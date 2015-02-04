@@ -1,0 +1,79 @@
+#!/usr/bin/env python
+#
+# vi: ft=python
+#
+# mk-config - create a cabal.config view for a historical version of Hackage.
+#
+# Synopsis:
+#
+#   wget http://hackage.haskell.org/packages/archive/00-index.tar.gz
+#   (mkdir zzz; cd zzz && tar zxf index.tar.gz)
+#   mk-config "2012-05-07 22:15:34" zzz > cabal.config
+#
+# This script relies on the fact that the upload times for packages are the
+# same as the last modified times on the .cabal files in the 00-index.tar.gz archive.
+#
+# It also assumes that versions were uploaded in increasing order - i.e.
+# version "0.2" was uploaded after "0.1".
+
+import os
+import time
+import datetime
+import re
+import argparse
+import sys
+
+parser = argparse.ArgumentParser()
+parser.add_argument("utc_time", help="YYYY-MM-DD HH:MM:SS time in UTC")
+parser.add_argument("cabals_dir", help="root of unpacked 00-index.tar.gz file")
+
+def main():
+  args = parser.parse_args()
+  utc_arg = args.utc_time
+  target = parse_date(utc_arg)
+  if target <= 0:
+    sys.exit("bad date: " + utc_arg)
+
+  rootdir = args.cabals_dir
+  if not os.path.isdir(rootdir):
+    sys.exit("not a directory: " + rootdir)
+
+  latest = {}
+
+  for subdir, dirs, files in os.walk(rootdir):
+    for f in files:
+      if not f.endswith(".cabal"): continue
+      p = os.path.join(subdir, f)
+      mtime = os.path.getmtime( p )
+      if mtime < target:
+        version = os.path.basename(subdir)
+        pkg, b = os.path.splitext(f)
+        oldmtime, _ = latest.get(pkg, (0,""))
+        if mtime > oldmtime:
+          latest[pkg] = (mtime, version)
+
+  print "-- Hackage versions as of " + time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(target))
+  print "constraints:"
+  rep(latest)
+
+def rep(latest):
+  pkgs = list(sorted(latest))
+  n = len(pkgs)
+  for i in xrange(0,len(pkgs)):
+    comma = ","
+    if i >= n-1: comma = ""
+    pkg = pkgs[i]
+    mtime, version = latest[pkg]
+    # comment = " -- " + time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(mtime))
+    constraint = pkg + " <= " + version + comma
+    print "  " + constraint
+
+def timegm(y,mo,d,h=0,mi=0,s=0):
+  dt = datetime.datetime(y,mo,d,h,mi,s)
+  return (dt - datetime.datetime(1970,1,1)).total_seconds()
+
+def parse_date(s):
+  return timegm(*map(int, re.split('\D', s)[0:6]))
+
+main()
+
